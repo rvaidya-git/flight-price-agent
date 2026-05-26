@@ -2,7 +2,8 @@ name: Check BA SFO to BOM flight price
 
 on:
   schedule:
-    - cron: "0 19,20 * * *"
+#    - cron: "0 19,20 * * *"
+     - cron: "0 */4 * * *"
 
   workflow_dispatch:
 

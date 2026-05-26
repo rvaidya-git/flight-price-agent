@@ -5,7 +5,7 @@ import html
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from resend import Resend
+import resend
 
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -123,12 +123,12 @@ def format_summary(candidate):
 
 
 def send_email(candidate, threshold):
-    resend = Resend(get_env("RESEND_API_KEY"))
+    resend.api_key = get_env("RESEND_API_KEY")
     summary = format_summary(candidate)
 
-    resend.emails.send({
+    params: resend.Emails.SendParams = {
         "from": "Flight Alert <onboarding@resend.dev>",
-        "to": get_env("ALERT_TO_EMAIL"),
+        "to": [get_env("ALERT_TO_EMAIL")],
         "subject": f"Flight alert: BA SFO → BOM is ${candidate['price']}",
         "html": f"""
             <h2>Flight price alert</h2>
@@ -141,7 +141,9 @@ def send_email(candidate, threshold):
             <p>Threshold: <strong>${threshold}</strong></p>
             <pre>{html.escape(summary)}</pre>
         """,
-    })
+    }
+
+    resend.Emails.send(params)
 
 
 def main():

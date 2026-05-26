@@ -17,6 +17,31 @@ def get_env(name: str) -> str:
     return value
 
 
+def format_money(value):
+    if isinstance(value, int):
+        return f"${value:,}"
+    return "Price unavailable"
+
+
+def format_duration(value):
+    if value is None:
+        return "N/A"
+
+    if isinstance(value, int):
+        hours = value // 60
+        minutes = value % 60
+        if hours and minutes:
+            return f"{hours}h {minutes}m"
+        if hours:
+            return f"{hours}h"
+        return f"{minutes}m"
+
+    if isinstance(value, str):
+        return value
+
+    return str(value)
+
+
 def serpapi_request(params):
     response = requests.get(SERPAPI_ENDPOINT, params=params, timeout=120)
     response.raise_for_status()
@@ -36,11 +61,11 @@ def base_params():
         "adults": "2",
         "children": "2",
         "currency": "USD",
-        "include_airlines": "BA",     # British Airways
+        "include_airlines": "BA",
         "stops": "2",                 # 1 stop or fewer
-        "outbound_times": "16,22",    # SFO departure window
-        "return_times": "0,4",        # BOM departure window
-        "sort_by": "2",              # Sort by price
+        "outbound_times": "16,22",
+        "return_times": "0,4",
+        "sort_by": "2",
         "deep_search": "true",
         "show_hidden": "true",
     }
@@ -50,17 +75,12 @@ def get_flight_results(data):
     results = []
     for bucket in ["best_flights", "other_flights"]:
         for result in data.get(bucket, []) or []:
-            price = result.get("price")
-            if isinstance(price, int):
-                result["_bucket"] = bucket
+            if isinstance(result.get("price"), int):
                 results.append(result)
     return results
 
 
 def get_layover_count(result):
-    layovers = result.get("layovers")
-    if isinstance(layovers, list):
-        return len(layovers)
     flights = result.get("flights", [])
     if flights:
         return max(0, len(flights) - 1)
@@ -82,18 +102,13 @@ def is_ba_only(result):
     return True
 
 
-def has_exactly_one_stop(result):
-    layovers = get_layover_count(result)
-    return layovers == 1
-
-
 def pick_best_candidate(results):
     valid = []
 
     for result in results:
         if not is_ba_only(result):
             continue
-        if not has_exactly_one_stop(result):
+        if get_layover_count(result) != 1:
             continue
         valid.append(result)
 
@@ -104,16 +119,41 @@ def pick_best_candidate(results):
 
 
 def google_flights_search_url():
-    query = "Google Flights SFO to BOM British Airways premium economy Dec 17 2026 Jan 2 2027"
+    query = (
+        "Google Flights SFO BOM British Airways premium economy "
+        "Dec 17 2026 Jan 2 2027 2 adults 2 children"
+    )
     return "https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
 
 
-def format_segments_html(title, result):
-    flights = result.get("flights", [])
+def ba_booking_url():
+    return "https://www.britishairways.com/travel/book/public/en_us/flightList"
+
+
+def format_airport_time(airport):
+    airport_id = airport.get("id", "")
+    time = airport.get("time", "")
+    return f"{html.escape(str(airport_id))}<br>{html.escape(str(time))}"
+
+
+def format_layovers(result):
     layovers = result.get("layovers", [])
+    if not layovers:
+        return "<p><strong>Layover:</strong> N/A</p>"
+
+    items = []
+    for layover in layovers:
+        airport = layover.get("id") or layover.get("name") or "Unknown airport"
+        duration = format_duration(layover.get("duration"))
+        items.append(f"{html.escape(str(airport))}: {html.escape(duration)}")
+
+    return f"<p><strong>Layover:</strong> {'; '.join(items)}</p>"
+
+
+def format_leg_html(title, result):
+    flights = result.get("flights", [])
 
     rows = []
-
     for i, flight in enumerate(flights, start=1):
         dep = flight.get("departure_airport", {})
         arr = flight.get("arrival_airport", {})
@@ -121,39 +161,33 @@ def format_segments_html(title, result):
         rows.append(f"""
             <tr>
                 <td>{i}</td>
-                <td>{html.escape(str(flight.get("airline", "")))}</td>
                 <td>{html.escape(str(flight.get("flight_number", "")))}</td>
-                <td>{html.escape(str(dep.get("id", "")))}<br>{html.escape(str(dep.get("time", "")))}</td>
-                <td>{html.escape(str(arr.get("id", "")))}<br>{html.escape(str(arr.get("time", "")))}</td>
+                <td>{html.escape(str(flight.get("airline", "")))}</td>
+                <td>{format_airport_time(dep)}</td>
+                <td>{format_airport_time(arr)}</td>
                 <td>{html.escape(str(flight.get("airplane", "")))}</td>
                 <td>{html.escape(str(flight.get("travel_class", "")))}</td>
-                <td>{html.escape(str(flight.get("duration", "")))}</td>
+                <td>{html.escape(format_duration(flight.get("duration")))}</td>
             </tr>
         """)
 
-    layover_text = ""
-    if layovers:
-        layover_lines = []
-        for layover in layovers:
-            airport = layover.get("id") or layover.get("name") or ""
-            duration = layover.get("duration", "")
-            layover_lines.append(f"{airport}: {duration} minutes")
-        layover_text = "<p><strong>Layovers:</strong> " + html.escape("; ".join(layover_lines)) + "</p>"
+    total_duration = format_duration(result.get("total_duration"))
 
     return f"""
         <h3>{html.escape(title)}</h3>
         <p>
-            <strong>Price:</strong> ${result.get("price", "N/A")}<br>
-            <strong>Stops:</strong> {get_layover_count(result)}<br>
-            <strong>Result bucket:</strong> {html.escape(str(result.get("_bucket", "")))}
+            <strong>Total leg duration:</strong> {html.escape(total_duration)}<br>
+            <strong>Stops:</strong> {get_layover_count(result)}
         </p>
-        {layover_text}
-        <table border="1" cellpadding="6" cellspacing="0">
+
+        {format_layovers(result)}
+
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
             <thead>
                 <tr>
                     <th>Segment</th>
-                    <th>Airline</th>
                     <th>Flight</th>
+                    <th>Airline</th>
                     <th>Depart</th>
                     <th>Arrive</th>
                     <th>Aircraft</th>
@@ -168,12 +202,19 @@ def format_segments_html(title, result):
     """
 
 
-def format_segments_text(title, result):
+def format_leg_text(title, result):
     lines = []
     lines.append(title)
-    lines.append(f"Price: ${result.get('price', 'N/A')}")
+    lines.append(f"Total leg duration: {format_duration(result.get('total_duration'))}")
     lines.append(f"Stops: {get_layover_count(result)}")
-    lines.append(f"Result bucket: {result.get('_bucket', '')}")
+
+    layovers = result.get("layovers", [])
+    if layovers:
+        for layover in layovers:
+            airport = layover.get("id") or layover.get("name") or "Unknown airport"
+            duration = format_duration(layover.get("duration"))
+            lines.append(f"Layover: {airport} for {duration}")
+
     lines.append("")
 
     for i, flight in enumerate(result.get("flights", []), start=1):
@@ -181,117 +222,90 @@ def format_segments_text(title, result):
         arr = flight.get("arrival_airport", {})
 
         lines.append(f"Segment {i}")
-        lines.append(f"  Airline: {flight.get('airline')}")
         lines.append(f"  Flight: {flight.get('flight_number')}")
+        lines.append(f"  Airline: {flight.get('airline')}")
         lines.append(f"  From: {dep.get('id')} at {dep.get('time')}")
         lines.append(f"  To: {arr.get('id')} at {arr.get('time')}")
         lines.append(f"  Aircraft: {flight.get('airplane')}")
         lines.append(f"  Cabin: {flight.get('travel_class')}")
-        lines.append(f"  Duration: {flight.get('duration')}")
+        lines.append(f"  Duration: {format_duration(flight.get('duration'))}")
         lines.append("")
 
     return "\n".join(lines)
 
 
-def get_booking_options(booking_token):
-    if not booking_token:
-        return None
-
-    params = base_params()
-    params.pop("departure_token", None)
-    params["booking_token"] = booking_token
-
-    # SerpApi says date and advanced-filter params are ignored when booking_token is used,
-    # but keeping route/traveler context is harmless.
-    return serpapi_request(params)
-
-
-def extract_booking_url(booking_data):
-    if not booking_data:
-        return None
-
-    booking_options = booking_data.get("booking_options", []) or []
-
-    for option in booking_options:
-        for key in ["link", "booking_request", "url"]:
-            value = option.get(key)
-            if isinstance(value, str) and value.startswith("http"):
-                return value
-
-    return None
-
-
-def send_email(outbound, return_flight, total_price, threshold, booking_url, booking_data):
+def send_email(outbound, return_flight, total_price, threshold):
     resend.api_key = get_env("RESEND_API_KEY")
 
-    search_url = google_flights_search_url()
-    final_booking_url = booking_url or search_url
+    google_link = google_flights_search_url()
+    ba_link = ba_booking_url()
 
-    outbound_html = format_segments_html("Outbound: SFO → BOM", outbound)
-    return_html = format_segments_html("Return: BOM → SFO", return_flight)
+    outbound_html = format_leg_html("Outbound: SFO → BOM", outbound)
+    return_html = format_leg_html("Return: BOM → SFO", return_flight)
 
-    outbound_text = format_segments_text("Outbound: SFO → BOM", outbound)
-    return_text = format_segments_text("Return: BOM → SFO", return_flight)
-
-    booking_options_html = ""
-    if booking_data and booking_data.get("booking_options"):
-        rows = []
-        for option in booking_data.get("booking_options", [])[:5]:
-            rows.append(f"""
-                <li>
-                    {html.escape(str(option.get("together", option.get("name", "Booking option"))))}
-                    — {html.escape(str(option.get("price", "")))}
-                </li>
-            """)
-        booking_options_html = f"""
-            <h3>Booking options returned by SerpApi</h3>
-            <ul>{''.join(rows)}</ul>
-        """
+    outbound_text = format_leg_text("Outbound: SFO → BOM", outbound)
+    return_text = format_leg_text("Return: BOM → SFO", return_flight)
 
     params: resend.Emails.SendParams = {
         "from": "Flight Alert <onboarding@resend.dev>",
         "to": [get_env("ALERT_TO_EMAIL")],
-        "subject": f"Flight alert: BA SFO ↔ BOM is ${total_price}",
+        "subject": f"Flight alert: BA SFO ↔ BOM is {format_money(total_price)}",
         "html": f"""
-            <h2>Flight price alert</h2>
+            <div style="font-family: Arial, sans-serif; line-height: 1.45;">
+                <h2>BA Premium Economy Flight Alert</h2>
 
-            <p><strong>Route:</strong> SFO ↔ BOM</p>
-            <p><strong>Dates:</strong> Dec 17, 2026 to Jan 2, 2027</p>
-            <p><strong>Travelers:</strong> 2 adults, 2 children</p>
-            <p><strong>Airline:</strong> British Airways</p>
-            <p><strong>Cabin:</strong> Premium Economy</p>
-            <p><strong>Total estimated price:</strong> ${total_price}</p>
-            <p><strong>Threshold:</strong> ${threshold}</p>
+                <p style="font-size: 18px;">
+                    <strong>Best itinerary found:</strong> {format_money(total_price)}
+                </p>
 
-            <p>
-                <a href="{html.escape(final_booking_url)}">
-                    Open booking/search page
-                </a>
-            </p>
+                <p>
+                    <strong>Route:</strong> SFO ↔ BOM<br>
+                    <strong>Dates:</strong> Dec 17, 2026 → Jan 2, 2027<br>
+                    <strong>Travelers:</strong> 2 adults, 2 children<br>
+                    <strong>Airline:</strong> British Airways<br>
+                    <strong>Cabin:</strong> Premium Economy<br>
+                    <strong>Your alert threshold:</strong> {format_money(threshold)}
+                </p>
 
-            {outbound_html}
-            {return_html}
-            {booking_options_html}
+                <p>
+                    <a href="{html.escape(google_link)}" style="font-size: 16px;">
+                        Search this itinerary on Google Flights
+                    </a>
+                    <br>
+                    <a href="{html.escape(ba_link)}" style="font-size: 16px;">
+                        Open British Airways booking page
+                    </a>
+                </p>
 
-            <hr>
-            <p>
-                Note: Google Flights booking links can expire or resolve differently by session.
-                If the direct booking link does not work, use the Google Flights search link.
-            </p>
+                <p>
+                    <em>
+                        Note: exact booking links from Google Flights/SerpApi can expire or fail by session.
+                        These links are intentionally stable search/booking entry points.
+                    </em>
+                </p>
+
+                {outbound_html}
+                <br>
+                {return_html}
+            </div>
         """,
         "text": f"""
-Flight price alert
+BA Premium Economy Flight Alert
+
+Best itinerary found: {format_money(total_price)}
 
 Route: SFO ↔ BOM
-Dates: Dec 17, 2026 to Jan 2, 2027
+Dates: Dec 17, 2026 → Jan 2, 2027
 Travelers: 2 adults, 2 children
 Airline: British Airways
 Cabin: Premium Economy
-Total estimated price: ${total_price}
-Threshold: ${threshold}
+Alert threshold: {format_money(threshold)}
 
-Booking/search link:
-{final_booking_url}
+Google Flights search:
+{google_link}
+
+British Airways booking page:
+{ba_link}
 
 {outbound_text}
 
@@ -322,11 +336,12 @@ def main():
         return
 
     print("Selected outbound:")
-    print(format_segments_text("Outbound: SFO → BOM", outbound))
+    print(format_leg_text("Outbound: SFO → BOM", outbound))
 
-    print("Fetching return flights using departure_token...")
+    print("Fetching return flights...")
     return_params = base_params()
     return_params["departure_token"] = departure_token
+
     return_data = serpapi_request(return_params)
     return_results = get_flight_results(return_data)
     return_flight = pick_best_candidate(return_results)
@@ -337,27 +352,15 @@ def main():
         return
 
     print("Selected return:")
-    print(format_segments_text("Return: BOM → SFO", return_flight))
+    print(format_leg_text("Return: BOM → SFO", return_flight))
 
-    # In the return-token response, the return candidate price is usually the full round-trip price.
-    # If not present, fall back to outbound + return, but that may overstate the fare.
     total_price = return_flight.get("price") or outbound.get("price")
+
     if not isinstance(total_price, int):
-        print("Could not determine total price.")
+        print("Could not determine total itinerary price.")
         return
 
-    print(f"Estimated round-trip price: ${total_price}")
-
-    booking_token = return_flight.get("booking_token")
-    booking_data = None
-    booking_url = None
-
-    if booking_token:
-        print("Fetching booking options using booking_token...")
-        booking_data = get_booking_options(booking_token)
-        booking_url = extract_booking_url(booking_data)
-    else:
-        print("No booking_token returned. Email will include Google Flights search link only.")
+    print(f"Best itinerary price: {format_money(total_price)}")
 
     if total_price <= threshold:
         send_email(
@@ -365,12 +368,10 @@ def main():
             return_flight=return_flight,
             total_price=total_price,
             threshold=threshold,
-            booking_url=booking_url,
-            booking_data=booking_data,
         )
         print("Alert sent.")
     else:
-        print(f"No alert. Price ${total_price} > threshold ${threshold}.")
+        print(f"No alert. Price {format_money(total_price)} > threshold {format_money(threshold)}.")
 
 
 if __name__ == "__main__":

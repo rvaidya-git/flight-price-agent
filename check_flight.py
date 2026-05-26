@@ -147,9 +147,9 @@ def send_email(candidate, threshold):
 
 
 def main():
-    if not is_noon_pacific():
-        print("Not noon Pacific. Exiting without using SerpApi.")
-        return
+#    if not is_noon_pacific():
+#        print("Not noon Pacific. Exiting without using SerpApi.")
+#        return
 
     threshold = int(get_env("PRICE_THRESHOLD_USD"))
 

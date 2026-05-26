@@ -1,0 +1,35 @@
+name: Check BA SFO to BOM flight price
+
+on:
+  schedule:
+    # GitHub cron supports UTC scheduling.
+    # 19:00 UTC = noon Pacific during daylight time.
+    # 20:00 UTC = noon Pacific during standard time.
+    # Script exits unless it is actually noon Pacific.
+    - cron: "0 19,20 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  check-flight:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check flight price
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_TO_EMAIL: ${{ secrets.ALERT_TO_EMAIL }}
+          PRICE_THRESHOLD_USD: ${{ secrets.PRICE_THRESHOLD_USD }}
+        run: python check_flight.py

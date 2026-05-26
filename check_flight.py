@@ -117,13 +117,26 @@ def pick_best_candidate(results):
 
     return sorted(valid, key=lambda x: x.get("price", 10**9))[0]
 
+def extract_google_flights_url(data):
+    """
+    Try to extract a real Google Flights deep link from SerpApi response.
+    """
 
-def google_flights_search_url():
-    query = (
-        "Google Flights SFO BOM British Airways premium economy "
-        "Dec 17 2026 Jan 2 2027 2 adults 2 children"
-    )
-    return "https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
+    # Most reliable location
+    search_metadata = data.get("search_metadata", {})
+    if isinstance(search_metadata, dict):
+        google_url = search_metadata.get("google_flights_url")
+        if isinstance(google_url, str) and google_url.startswith("http"):
+            return google_url
+
+    # Sometimes appears in search_parameters
+    search_parameters = data.get("search_parameters", {})
+    if isinstance(search_parameters, dict):
+        google_url = search_parameters.get("google_flights_url")
+        if isinstance(google_url, str) and google_url.startswith("http"):
+            return google_url
+
+    return None
 
 
 def ba_booking_url():
@@ -234,10 +247,14 @@ def format_leg_text(title, result):
     return "\n".join(lines)
 
 
-def send_email(outbound, return_flight, total_price, threshold):
+def send_email(outbound, return_flight, total_price, threshold, outbound_data):
     resend.api_key = get_env("RESEND_API_KEY")
 
-    google_link = google_flights_search_url()
+    google_link = extract_google_flights_url(outbound_data)
+
+    if not google_link:
+        google_link = "https://www.google.com/travel/flights"
+    
     ba_link = ba_booking_url()
 
     outbound_html = format_leg_html("Outbound: SFO → BOM", outbound)
@@ -368,6 +385,7 @@ def main():
             return_flight=return_flight,
             total_price=total_price,
             threshold=threshold,
+            outbound_data=outbound_data,
         )
         print("Alert sent.")
     else:

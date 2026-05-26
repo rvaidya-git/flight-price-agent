@@ -2,10 +2,6 @@ name: Check BA SFO to BOM flight price
 
 on:
   schedule:
-    # GitHub cron supports UTC scheduling.
-    # 19:00 UTC = noon Pacific during daylight time.
-    # 20:00 UTC = noon Pacific during standard time.
-    # Script exits unless it is actually noon Pacific.
     - cron: "0 19,20 * * *"
 
   workflow_dispatch:
@@ -13,6 +9,9 @@ on:
 jobs:
   check-flight:
     runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Check out repo

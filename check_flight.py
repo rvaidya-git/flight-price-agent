@@ -38,8 +38,8 @@ def fetch_flights():
         "currency": "USD",
         "include_airlines": "BA",     # British Airways
         "stops": "2",                 # 1 stop or fewer
-        "outbound_times": "16,20",    # SFO departure: 4 PM - 8 PM
-        "return_times": "0,4",        # BOM departure: midnight - 4 AM
+        "outbound_times": "16,18",    # SFO departure: 4 PM - 8 PM
+        "return_times": "1,3",        # BOM departure: midnight - 4 AM
         "sort_by": "2",              # Sort by price
         "deep_search": "true",
         "show_hidden": "true",
